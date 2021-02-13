@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,8 @@ const (
 	maxIteration = 10000
 	width        = 3840
 	height       = 2160
+	concurrent   = true
+	workers      = 16
 )
 
 func main() {
@@ -20,23 +23,51 @@ func main() {
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{width, height}
 	palette := calculatePalette()
+	heightChunk := int(height / workers)
 
 	fmt.Println("Creating image...")
 	startTime := time.Now()
 	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
-	for Px := 0; Px < width; Px++ {
-		for Py := 0; Py < height; Py++ {
-			x0, y0 := mandelbrotScale(Px, Py)
-			var x, y float64
-			iteration := uint32(0)
-			for x*x+y*y <= 2*2 && iteration < maxIteration {
-				xtemp := x*x - y*y + x0
-				y = 2*x*y + y0
-				x = xtemp
-				iteration++
+	if concurrent && workers != 1 {
+		fmt.Printf("Using %v workers...\n", workers)
+		wg := &sync.WaitGroup{}
+		wg.Add(workers)
+		for i := 0; i < workers; i++ {
+			go func(starty int, wg *sync.WaitGroup) {
+				for Px := 0; Px < width; Px++ {
+					for Py := starty; Py < starty+heightChunk; Py++ {
+						x0, y0 := mandelbrotScale(Px, Py)
+						var x, y float64
+						iteration := uint32(0)
+						for x*x+y*y <= 2*2 && iteration < maxIteration {
+							xtemp := x*x - y*y + x0
+							y = 2*x*y + y0
+							x = xtemp
+							iteration++
+						}
+						color := palette[iteration-1]
+						img.Set(Px, Py, color)
+					}
+				}
+				wg.Done()
+			}(i*heightChunk, wg)
+		}
+		wg.Wait()
+	} else {
+		for Px := 0; Px < width; Px++ {
+			for Py := 0; Py < height; Py++ {
+				x0, y0 := mandelbrotScale(Px, Py)
+				var x, y float64
+				iteration := uint32(0)
+				for x*x+y*y <= 2*2 && iteration < maxIteration {
+					xtemp := x*x - y*y + x0
+					y = 2*x*y + y0
+					x = xtemp
+					iteration++
+				}
+				color := palette[iteration-1]
+				img.Set(Px, Py, color)
 			}
-			color := palette[iteration-1]
-			img.Set(Px, Py, color)
 		}
 	}
 
