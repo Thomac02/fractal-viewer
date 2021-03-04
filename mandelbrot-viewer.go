@@ -8,15 +8,21 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/faiface/pixel"
+	"github.com/faiface/pixel/pixelgl"
+	"golang.org/x/image/colornames"
 )
 
 const (
 	maxIteration = 10000
-	width        = 3840
-	height       = 2160
+	width        = 1920
+	height       = 1080
 	concurrent   = true
 	workers      = 16
 )
+
+var mandelbrot pixel.Picture
 
 func main() {
 
@@ -75,6 +81,9 @@ func main() {
 	f, _ := os.Create("images/image.png")
 	png.Encode(f, img)
 	fmt.Printf("Done, took %s\n", time.Since(startTime))
+	mandelbrot = pixel.PictureDataFromImage(img)
+
+	pixelgl.Run(run)
 }
 
 func mapVal(x, imin, imax, omin, omax float64) float64 {
@@ -94,4 +103,26 @@ func calculatePalette() []color.RGBA {
 		pal[i] = color.RGBA{uint8(inew >> 16), uint8(inew >> 8), uint8(inew), 0xFF}
 	}
 	return pal
+}
+
+func run() {
+	cfg := pixelgl.WindowConfig{
+		Title:  "mandelbrot-viewer",
+		Bounds: pixel.R(0, 0, width, height),
+		VSync:  true,
+	}
+	win, err := pixelgl.NewWindow(cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	sprite := pixel.NewSprite(mandelbrot, mandelbrot.Bounds())
+
+	win.Clear(colornames.Greenyellow)
+
+	sprite.Draw(win, pixel.IM.Moved(win.Bounds().Center()))
+
+	for !win.Closed() {
+		win.Update()
+	}
 }
