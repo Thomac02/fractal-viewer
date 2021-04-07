@@ -1,11 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
-	"os"
 	"sync"
 	"time"
 
@@ -15,71 +14,37 @@ import (
 )
 
 const (
-	maxIteration = 10000
-	width        = 1920
-	height       = 1080
-	concurrent   = true
-	workers      = 16
+	maxIteration   = 1000
+	screenWidth    = 1280
+	screenHeight   = 720
+	mandelbrotXMin = -2.5
+	mandelbrotYMin = -1.0
+	mandelbrotXMax = 1.0
+	mandelbrotYMax = 1.0
 )
 
-var mandelbrot pixel.Picture
+var (
+	mandelbrot pixel.Picture
+	palette    []color.RGBA
+	workers    *int
+	offsetX    float64
+	offsetY    float64
+	scaleX     = 1.0
+	scaleY     = 1.0
+	startPanX  uint32
+	startPanY  uint32
+)
 
 func main() {
 
-	upLeft := image.Point{0, 0}
-	lowRight := image.Point{width, height}
-	palette := calculatePalette()
-	heightChunk := int(height / workers)
+	palette = calculatePalette()
+	workers = flag.Int("workers", 1, "number of workers to use")
+	flag.Parse()
 
 	fmt.Println("Creating image...")
 	startTime := time.Now()
-	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
-	if concurrent && workers != 1 {
-		fmt.Printf("Using %v workers...\n", workers)
-		wg := &sync.WaitGroup{}
-		wg.Add(workers)
-		for i := 0; i < workers; i++ {
-			go func(starty int, wg *sync.WaitGroup) {
-				for Px := 0; Px < width; Px++ {
-					for Py := starty; Py < starty+heightChunk; Py++ {
-						x0, y0 := mandelbrotScale(Px, Py)
-						var x, y float64
-						iteration := uint32(0)
-						for x*x+y*y <= 2*2 && iteration < maxIteration {
-							xtemp := x*x - y*y + x0
-							y = 2*x*y + y0
-							x = xtemp
-							iteration++
-						}
-						color := palette[iteration-1]
-						img.Set(Px, Py, color)
-					}
-				}
-				wg.Done()
-			}(i*heightChunk, wg)
-		}
-		wg.Wait()
-	} else {
-		for Px := 0; Px < width; Px++ {
-			for Py := 0; Py < height; Py++ {
-				x0, y0 := mandelbrotScale(Px, Py)
-				var x, y float64
-				iteration := uint32(0)
-				for x*x+y*y <= 2*2 && iteration < maxIteration {
-					xtemp := x*x - y*y + x0
-					y = 2*x*y + y0
-					x = xtemp
-					iteration++
-				}
-				color := palette[iteration-1]
-				img.Set(Px, Py, color)
-			}
-		}
-	}
-
-	// Encode as PNG.
-	f, _ := os.Create("images/image.png")
-	png.Encode(f, img)
+	fmt.Printf("Using %v workers...\n", *workers)
+	img := drawMandelbrot()
 	fmt.Printf("Done, took %s\n", time.Since(startTime))
 	mandelbrot = pixel.PictureDataFromImage(img)
 
@@ -90,9 +55,55 @@ func mapVal(x, imin, imax, omin, omax float64) float64 {
 	return (x-imin)*(omax-omin)/(imax-imin) + omin
 }
 
-func mandelbrotScale(x, y int) (float64, float64) {
-	scaledx := mapVal(float64(x), 0.0, float64(width), -2.5, 1.0)
-	scaledy := mapVal(float64(y), 0.0, float64(height), 1.0, -1.0)
+func drawMandelbrot() *image.RGBA {
+	upLeft := image.Point{0, 0}
+	lowRight := image.Point{screenWidth, screenHeight}
+	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
+	heightChunk := int(screenHeight / *workers)
+	wg := &sync.WaitGroup{}
+	wg.Add(*workers)
+	for i := 0; i < *workers; i++ {
+		go func(starty int, wg *sync.WaitGroup) {
+			for Px := 0; Px < screenWidth; Px++ {
+				for Py := starty; Py < starty+heightChunk; Py++ {
+					x0, y0 := mandelbrotScale(uint32(Px), uint32(Py))
+
+					// Cardioid checking
+					y02 := y0 * y0
+					q := (x0-0.25)*(x0-0.25) + y02
+					cardioid := q*(q+(x0-0.25)) <= 0.25*y02
+					bulb := (x0+1)*(x0+1)+y02 <= 0.0625
+					if cardioid || bulb {
+						color := palette[maxIteration-1]
+						img.Set(Px, Py, color)
+						continue
+					}
+
+					// Optimised escape time
+					var x, y, x2, y2 float64
+					iteration := uint32(0)
+					for x2+y2 <= 4 && iteration < maxIteration {
+						y = (x+x)*y + y0
+						x = x2 - y2 + x0
+						x2 = x * x
+						y2 = y * y
+						iteration++
+					}
+					color := palette[iteration-1]
+					img.Set(Px, Py, color)
+				}
+			}
+			wg.Done()
+		}(i*heightChunk, wg)
+	}
+	wg.Wait()
+	return img
+}
+
+func mandelbrotScale(x, y uint32) (float64, float64) {
+	x_f, y_f := screenToWorld(x, y)
+	scaledx := mapVal(x_f, 0.0, float64(screenWidth), mandelbrotXMin, mandelbrotXMax)
+	scaledy := mapVal(y_f, 0.0, float64(screenHeight), mandelbrotYMax, mandelbrotYMin)
 	return scaledx, scaledy
 }
 
@@ -108,8 +119,8 @@ func calculatePalette() []color.RGBA {
 func run() {
 	cfg := pixelgl.WindowConfig{
 		Title:  "mandelbrot-viewer",
-		Bounds: pixel.R(0, 0, width, height),
-		VSync:  true,
+		Bounds: pixel.R(0, 0, screenWidth, screenHeight),
+		VSync:  false,
 	}
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
@@ -120,9 +131,63 @@ func run() {
 
 	win.Clear(colornames.Greenyellow)
 
-	sprite.Draw(win, pixel.IM.Moved(win.Bounds().Center()))
+	startMatrix := pixel.IM.Moved(win.Bounds().Center())
+	sprite.Draw(win, startMatrix)
+	currentMatrix := startMatrix
 
+	scaleX, scaleY = 1.0, 1.0
 	for !win.Closed() {
+		mousePos := win.MousePosition()
+		mouseXPos := uint32(mousePos.X)
+		mouseYPos := uint32(-mousePos.Y + screenHeight)
+		win.Clear(colornames.White)
+
+		if win.JustPressed(pixelgl.MouseButtonLeft) {
+			startPanX = mouseXPos
+			startPanY = mouseYPos
+		}
+
+		if win.Pressed(pixelgl.MouseButtonLeft) {
+			offsetX -= (float64(mouseXPos) - float64(startPanX)) / scaleX
+			offsetY -= (float64(mouseYPos) - float64(startPanY)) / scaleY
+			startPanX = mouseXPos
+			startPanY = mouseYPos
+		}
+
+		if win.Pressed(pixelgl.KeySpace) {
+			offsetX, offsetY = 0, 0
+			scaleX, scaleY = 1, 1
+		}
+
+		mouseXBeforeZoom, mouseYBeforeZoom := screenToWorld(mouseXPos, mouseYPos)
+		if win.MouseScroll().Y < 0 {
+			scaleX *= 1.1
+			scaleY *= 1.1
+		}
+
+		if win.MouseScroll().Y > 0 {
+			scaleX *= 0.9
+			scaleY *= 0.9
+		}
+		mouseXAfterZoom, mouseYAfterZoom := screenToWorld(mouseXPos, mouseYPos)
+		offsetX += mouseXBeforeZoom - mouseXAfterZoom
+		offsetY += mouseYBeforeZoom - mouseYAfterZoom
+
+		fmt.Printf("startPanX: %v startPanY: % v offsetX: %v offsetY: %v scaleX: %v scaleY: %v\n", startPanX, startPanY, offsetX, offsetY, scaleX, scaleY)
+		fmt.Printf("mouseX: %v, mouseY: %v\n", mouseXPos, mouseYPos)
+
+		mandelbrot = pixel.PictureDataFromImage(drawMandelbrot())
+		sprite.Set(mandelbrot, mandelbrot.Bounds())
+		sprite.Draw(win, currentMatrix)
+
 		win.Update()
 	}
+}
+
+func screenToWorld(screenX, screenY uint32) (worldX, worldY float64) {
+	return float64(screenX)/scaleX + offsetX, float64(screenY)/scaleY + offsetY
+}
+
+func worldToScreen(worldX, worldY float64) (screenX, screenY uint32) {
+	return uint32((worldX - offsetX) * scaleX), uint32((worldY - offsetY) * scaleY)
 }
