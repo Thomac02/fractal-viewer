@@ -24,17 +24,19 @@ const (
 )
 
 var (
-	mandelbrot pixel.Picture
-	palette    []color.RGBA
-	workers    *int
-	offsetX    float64
-	offsetY    float64
-	scaleX     = 1.0
-	scaleY     = 1.0
-	startPanX  uint32
-	startPanY  uint32
-	xMapScale  float64
-	yMapScale  float64
+	mandelbrot    pixel.Picture
+	palette       []color.RGBA
+	workers       *int
+	offsetX       float64
+	offsetY       float64
+	scaleX        = 1.0
+	scaleY        = 1.0
+	scaleXInverse float64
+	scaleYInverse float64
+	startPanX     uint32
+	startPanY     uint32
+	xMapScale     float64
+	yMapScale     float64
 )
 
 func main() {
@@ -45,13 +47,9 @@ func main() {
 	xMapScale = (mandelbrotXMax - mandelbrotXMin) / float64(screenWidth)
 	yMapScale = (mandelbrotYMin - mandelbrotYMax) / float64(screenHeight)
 
-	fmt.Println("Creating image...")
-	startTime := time.Now()
 	fmt.Printf("Using %v workers...\n", *workers)
 	img := drawMandelbrot()
-	fmt.Printf("Done, took %s\n", time.Since(startTime))
 	mandelbrot = pixel.PictureDataFromImage(img)
-
 	pixelgl.Run(run)
 }
 
@@ -124,13 +122,14 @@ func run() {
 	cfg := pixelgl.WindowConfig{
 		Title:  "mandelbrot-viewer",
 		Bounds: pixel.R(0, 0, screenWidth, screenHeight),
-		VSync:  false,
+		VSync:  true,
 	}
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
 		panic(err)
 	}
 
+	mandelbrot = pixel.PictureDataFromImage(drawMandelbrot())
 	sprite := pixel.NewSprite(mandelbrot, mandelbrot.Bounds())
 
 	win.Clear(colornames.Greenyellow)
@@ -167,17 +166,27 @@ func run() {
 		if win.MouseScroll().Y < 0 {
 			scaleX *= 1.1
 			scaleY *= 1.1
+			scaleXInverse = 1 / scaleX
+			scaleYInverse = 1 / scaleY
 		}
 
 		if win.MouseScroll().Y > 0 {
 			scaleX *= 0.9
 			scaleY *= 0.9
+			scaleXInverse = 1 / scaleX
+			scaleYInverse = 1 / scaleY
 		}
 		mouseXAfterZoom, mouseYAfterZoom := screenToWorld(mouseXPos, mouseYPos)
 		offsetX += mouseXBeforeZoom - mouseXAfterZoom
 		offsetY += mouseYBeforeZoom - mouseYAfterZoom
 
+		//fmt.Printf("startPanX: %v startPanY: % v offsetX: %v offsetY: %v scaleX: %v scaleY: %v\n", startPanX, startPanY, offsetX, offsetY, scaleX, scaleY)
+		//fmt.Printf("mouseX: %v, mouseY: %v\n", mouseXPos, mouseYPos)
+
+		renderTimeStart := time.Now()
 		mandelbrot = pixel.PictureDataFromImage(drawMandelbrot())
+		renderTime := time.Since(renderTimeStart)
+		fmt.Printf("render time: %s\n", renderTime)
 		sprite.Set(mandelbrot, mandelbrot.Bounds())
 		sprite.Draw(win, currentMatrix)
 
@@ -186,7 +195,7 @@ func run() {
 }
 
 func screenToWorld(screenX, screenY uint32) (worldX, worldY float64) {
-	return float64(screenX)/scaleX + offsetX, float64(screenY)/scaleY + offsetY
+	return float64(screenX)*scaleXInverse + offsetX, float64(screenY)*scaleYInverse + offsetY
 }
 
 func worldToScreen(worldX, worldY float64) (screenX, screenY uint32) {
