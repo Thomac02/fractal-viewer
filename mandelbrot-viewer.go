@@ -33,6 +33,8 @@ var (
 	scaleY     = 1.0
 	startPanX  uint32
 	startPanY  uint32
+	xMapScale  float64
+	yMapScale  float64
 )
 
 func main() {
@@ -40,6 +42,8 @@ func main() {
 	palette = calculatePalette()
 	workers = flag.Int("workers", 1, "number of workers to use")
 	flag.Parse()
+	xMapScale = (mandelbrotXMax - mandelbrotXMin) / float64(screenWidth)
+	yMapScale = (mandelbrotYMin - mandelbrotYMax) / float64(screenHeight)
 
 	fmt.Println("Creating image...")
 	startTime := time.Now()
@@ -102,8 +106,8 @@ func drawMandelbrot() *image.RGBA {
 
 func mandelbrotScale(x, y uint32) (float64, float64) {
 	x_f, y_f := screenToWorld(x, y)
-	scaledx := mapVal(x_f, 0.0, float64(screenWidth), mandelbrotXMin, mandelbrotXMax)
-	scaledy := mapVal(y_f, 0.0, float64(screenHeight), mandelbrotYMax, mandelbrotYMin)
+	scaledx := x_f*xMapScale + mandelbrotXMin
+	scaledy := y_f*yMapScale + mandelbrotYMax
 	return scaledx, scaledy
 }
 
@@ -172,9 +176,6 @@ func run() {
 		mouseXAfterZoom, mouseYAfterZoom := screenToWorld(mouseXPos, mouseYPos)
 		offsetX += mouseXBeforeZoom - mouseXAfterZoom
 		offsetY += mouseYBeforeZoom - mouseYAfterZoom
-
-		fmt.Printf("startPanX: %v startPanY: % v offsetX: %v offsetY: %v scaleX: %v scaleY: %v\n", startPanX, startPanY, offsetX, offsetY, scaleX, scaleY)
-		fmt.Printf("mouseX: %v, mouseY: %v\n", mouseXPos, mouseYPos)
 
 		mandelbrot = pixel.PictureDataFromImage(drawMandelbrot())
 		sprite.Set(mandelbrot, mandelbrot.Bounds())
