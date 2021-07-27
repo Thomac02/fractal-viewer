@@ -1,4 +1,4 @@
-module github.com/Thomac02/mandelbrot-viewer
+module github.com/Thomac02/fractal-viewer
 
 go 1.15
 
