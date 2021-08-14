@@ -44,12 +44,17 @@ func (m *mandelbrot) Draw(scale, offsetX, offsetY float64) *image.RGBA {
 	wg := &sync.WaitGroup{}
 	wg.Add(int(m.workers))
 
-	// Calculate scale inverse to avoid unnecessary divisions.
+	// Calculate scale inverse to avoid unnecessary divisions in the loop.
 	scaleInverse := 1 / scale
 	for i := 0; i < int(m.workers); i++ {
-		go func(starty int, wg *sync.WaitGroup) {
+		startY := i * heightChunk
+		endY := startY + heightChunk
+		if i == int(m.workers)-1 && endY < int(m.resY) {
+			endY = int(m.resY)
+		}
+		go func(starty, endy int, wg *sync.WaitGroup) {
 			for Px := 0; Px < int(m.resX); Px++ {
-				for Py := starty; Py < starty+heightChunk; Py++ {
+				for Py := starty; Py < endy; Py++ {
 					x0, y0 := m.scale(uint32(Px), uint32(Py), scaleInverse, offsetX, offsetY)
 
 					// Cardioid checking
@@ -78,7 +83,7 @@ func (m *mandelbrot) Draw(scale, offsetX, offsetY float64) *image.RGBA {
 				}
 			}
 			wg.Done()
-		}(i*heightChunk, wg)
+		}(startY, endY, wg)
 	}
 	wg.Wait()
 	return img

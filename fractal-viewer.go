@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"image"
-	"time"
 
 	"github.com/Thomac02/fractal-viewer/fractal"
 
@@ -105,10 +104,7 @@ func run() {
 		offsetX += mouseXBeforeZoom - mouseXAfterZoom
 		offsetY += mouseYBeforeZoom - mouseYAfterZoom
 
-		renderTimeStart := time.Now()
 		picture = pixel.PictureDataFromImage(fract.Draw(scale, offsetX, offsetY))
-		renderTime := time.Since(renderTimeStart)
-		fmt.Printf("render time: %s\n", renderTime)
 		sprite.Set(picture, picture.Bounds())
 		sprite.Draw(win, currentMatrix)
 
